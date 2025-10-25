@@ -6,7 +6,7 @@ import type { NextRequest } from 'next/server';
 
 // 从环境变量读取配置
 const RECEIVER_ADDRESS = process.env.RECEIVER_WALLET_ADDRESS || '0xc61cd7032925603c63b2eb658e2b56faac351d24';
-const NETWORK = 'base';
+const NETWORK = 'base'; // x402scan 要求
 
 // x402scan 兼容的 402 响应生成器
 function createX402ScanResponse(
@@ -18,6 +18,7 @@ function createX402ScanResponse(
   const fullUrl = request.nextUrl.toString();
   
   // 将美元价格转换为 USDC 最小单位 (6 位小数)
+  // $0.05 = 50000 (0.05 * 1000000)
   const maxAmountRequired = Math.floor(priceUSD * 1000000).toString();
   
   return NextResponse.json(
@@ -43,6 +44,7 @@ function createX402ScanResponse(
       headers: {
         'Content-Type': 'application/json',
         'X-Payment-Required': 'true',
+        'X-Payment-Network': NETWORK,
       }
     }
   );
@@ -51,6 +53,7 @@ function createX402ScanResponse(
 export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   
+  // 检查是否有支付凭证
   const paymentToken = request.headers.get('X-Payment');
   
   if (paymentToken) {
@@ -198,3 +201,4 @@ export const config = {
     '/api/buy-token/:path*',
   ]
 };
+
