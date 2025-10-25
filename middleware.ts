@@ -1,57 +1,48 @@
-// 主网中间件配置 - 使用 CDP Facilitator 和真实 USDC
-// ⚠️ 这会接受真实的加密货币支付！
+// x402scan 兼容的中间件配置
+// 完全符合 x402scan 的严格 schema 要求
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// 注意：这是简化版本，因为我们遇到了 Solana 依赖问题
-// 如果 x402-next 的 Solana 问题解决后，可以使用完整版本：
-// import { paymentMiddleware } from 'x402-next';
-// import { facilitator } from '@coinbase/x402';
-
 // 从环境变量读取配置
 const RECEIVER_ADDRESS = process.env.RECEIVER_WALLET_ADDRESS || '0xc61cd7032925603c63b2eb658e2b56faac351d24';
-const NETWORK = process.env.NETWORK || 'base-mainnet';
-const CDP_API_KEY_ID = process.env.CDP_API_KEY_ID;
-const CDP_API_KEY_SECRET = process.env.CDP_API_KEY_SECRET;
+const NETWORK = 'base';
 
-// 验证主网配置
-if (NETWORK === 'base-mainnet') {
-  if (!CDP_API_KEY_ID || !CDP_API_KEY_SECRET) {
-    console.warn('⚠️ 警告：主网模式需要 CDP_API_KEY_ID 和 CDP_API_KEY_SECRET');
-    console.warn('请在 .env.local 中设置这些环境变量');
-  }
-}
-
-// 主网 402 响应生成器
-function create402Response(price: string, network: string, description: string) {
+// x402scan 兼容的 402 响应生成器
+function createX402ScanResponse(
+  request: NextRequest,
+  priceUSD: number,
+  description: string,
+  outputSchema?: any
+) {
+  const fullUrl = request.nextUrl.toString();
+  
+  // 将美元价格转换为 USDC 最小单位 (6 位小数)
+  const maxAmountRequired = Math.floor(priceUSD * 1000000).toString();
+  
   return NextResponse.json(
     {
-      error: 'Payment Required',
-      price: price,
-      network: network,
-      description: description,
-      facilitator: {
-        type: 'cdp',
-        network: 'mainnet',
-        // CDP facilitator 会使用环境变量中的 API 密钥
-        message: 'Using Coinbase Developer Platform facilitator for mainnet'
-      },
-      paymentInstructions: {
-        message: 'Payment required to access this resource',
-        price: price,
-        network: network,
-        receiverAddress: RECEIVER_ADDRESS,
-        acceptedTokens: ['ETH', 'USDC'],
-        chainId: 8453, // Base mainnet chain ID
-      }
+      x402Version: 1,
+      accepts: [
+        {
+          scheme: "exact",
+          network: "base",
+          maxAmountRequired: maxAmountRequired,
+          resource: fullUrl,
+          description: description,
+          mimeType: "application/json",
+          payTo: RECEIVER_ADDRESS,
+          maxTimeoutSeconds: 60,
+          asset: "USDC",
+          ...(outputSchema && { outputSchema })
+        }
+      ]
     },
     { 
       status: 402,
       headers: {
+        'Content-Type': 'application/json',
         'X-Payment-Required': 'true',
-        'X-Payment-Network': network,
-        'X-Payment-Price': price,
       }
     }
   );
@@ -60,51 +51,139 @@ function create402Response(price: string, network: string, description: string) 
 export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   
-  // 检查是否有支付凭证
   const paymentToken = request.headers.get('X-Payment');
   
-  // 简化版本：检查支付 token
-  // 真实实现需要验证区块链交易
   if (paymentToken) {
-    console.log('⚠️ 收到支付凭证，但简化版无法验证真实交易');
-    console.log('需要完整的 x402-next 实现来验证支付');
-    // 在真实实现中，这里会验证区块链交易
+    console.log('Payment token received, verification needed');
   }
   
-  console.log(`🔒 Payment middleware triggered (${NETWORK}):`, pathname);
+  console.log(`x402scan middleware:`, pathname);
   
-  // 检查路由并返回 402
+  // Protected 页面
   if (pathname.startsWith('/protected')) {
-    return create402Response(
-      '$0.01',
-      NETWORK,
-      'Access exclusive protected content with premium features and insights'
+    return createX402ScanResponse(
+      request,
+      0.01,
+      'Access exclusive protected content with premium features and insights',
+      {
+        input: {
+          type: "http",
+          method: "GET"
+        },
+        output: {
+          type: "object",
+          properties: {
+            content: { type: "string", description: "Premium protected content" },
+            timestamp: { type: "string", description: "Content timestamp" }
+          }
+        }
+      }
     );
   }
   
+  // Premium API
   if (pathname.startsWith('/api/premium')) {
-    return create402Response(
-      '$0.05',
-      NETWORK,
-      'Access premium API endpoint with real-time data, advanced analytics, and priority support'
+    return createX402ScanResponse(
+      request,
+      0.05,
+      'Access premium API endpoint with real-time data, advanced analytics, and priority support',
+      {
+        input: {
+          type: "http",
+          method: "GET",
+          queryParams: {
+            category: {
+              type: "string",
+              required: false,
+              description: "Data category to fetch",
+              enum: ["analytics", "reports", "insights"]
+            }
+          }
+        },
+        output: {
+          type: "object",
+          properties: {
+            data: { type: "object", description: "Premium data response" },
+            timestamp: { type: "string", description: "Data timestamp" },
+            premium: { type: "boolean", description: "Premium tier indicator" }
+          }
+        }
+      }
     );
   }
   
+  // Weather API
   if (pathname.startsWith('/api/weather')) {
-    return create402Response(
-      '$0.001',
-      NETWORK,
-      'Get real-time weather data including temperature, conditions, and humidity for any location worldwide'
+    return createX402ScanResponse(
+      request,
+      0.001,
+      'Get real-time weather data including temperature, conditions, and humidity for any location worldwide',
+      {
+        input: {
+          type: "http",
+          method: "GET",
+          queryParams: {
+            location: {
+              type: "string",
+              required: true,
+              description: "City name or coordinates"
+            },
+            units: {
+              type: "string",
+              required: false,
+              description: "Temperature units",
+              enum: ["celsius", "fahrenheit"]
+            }
+          }
+        },
+        output: {
+          type: "object",
+          properties: {
+            location: { type: "string", description: "Location name" },
+            temperature: { type: "number", description: "Current temperature" },
+            conditions: { type: "string", description: "Weather conditions" },
+            humidity: { type: "number", description: "Humidity percentage" },
+            timestamp: { type: "string", description: "Data timestamp" }
+          }
+        }
+      }
     );
   }
   
+  // Buy Token API
   if (pathname.startsWith('/api/buy-token')) {
-    // 代币购买端点 - 根据购买数量动态定价
-    // 默认 100 代币 = $1.00 USDC
-    return create402Response(
-      '$1.00',
-      NETWORK,
-      'Purchase tokens with USDC - receive tokens directly to your wallet'
+    return createX402ScanResponse(
+      request,
+      1.00,
+      'Purchase custom tokens with USDC - receive tokens directly to your wallet after payment confirmation',
+      {
+        input: {
+          type: "http",
+          method: "POST",
+          bodyType: "json",
+          bodyFields: {
+            amount: {
+              type: "number",
+              required: true,
+              description: "Amount of tokens to purchase (minimum 100)"
+            },
+            walletAddress: {
+              type: "string",
+              required: true,
+              description: "Your wallet address to receive tokens"
+            }
+          }
+        },
+        output: {
+          type: "object",
+          properties: {
+            success: { type: "boolean", description: "Transaction success status" },
+            tokenAmount: { type: "number", description: "Number of tokens purchased" },
+            transactionHash: { type: "string", description: "Blockchain transaction hash" },
+            receiverAddress: { type: "string", description: "Wallet address that received tokens" }
+          }
+        }
+      }
     );
   }
   
@@ -119,4 +198,3 @@ export const config = {
     '/api/buy-token/:path*',
   ]
 };
-
